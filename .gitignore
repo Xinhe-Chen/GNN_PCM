@@ -1,0 +1,59 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Testing / tooling caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/*
+# !.vscode/settings.json
+
+# --- Logs ---
+*.log
+
+# --- Prescient / Egret run outputs ---
+# Prescient writes timestamped result/output directories when a simulation runs;
+# these are regenerable and typically large, so keep them out of version control.
+*_output/
+*Output/
+outputs/
+results/
+deterministic_simulation_output/
+
+# --- Large / regenerable model & data artifacts ---
+# Trained checkpoints and figures are regenerable from the training scripts;
+# track them via git-lfs or a separate artifact store if you need them versioned.
+*.pt
+*.pth
+*.ckpt
+*.png
+*.jpg
+*.jpeg
+
+# --- Scratch / temp ---
+scratch/
+tmp/
+temp/
