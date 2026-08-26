@@ -1,51 +1,41 @@
 """
 Build RTS_Data/SourceData/initial_status.csv from gen.csv.
 
-This file is NOT part of stock RTS-GMLC / not documented in SourceData/README.md
-(the README is stale even for the files it does cover -- e.g. storage.csv). It
-follows the Prescient/Egret convention for generator initial conditions at the
-start of a UC horizon:
+Format per the Prescient docs:
+https://prescient.readthedocs.io/en/latest/reference/file_formats/rts-gmlc/initial_status.html
 
-    GEN UID         : matches gen.csv "GEN UID"
-    Committable      : whether this generator carries a UC on/off decision
-                        (thermal-type units with binding min up/down time).
-                        Non-committable units (solar/wind/hydro/storage/sync
-                        cond) are still listed for completeness but status /
-                        power_generated are not meaningful for them.
-    status           : hours the unit has been continuously in its current
-                        state, SIGNED: positive = on for that many hours,
-                        negative = off for that many hours. E.g. +12 means
-                        "on for the last 12 hours"; -6 means "off for the
-                        last 6 hours."
-    power_generated  : MW output at t=0 (0 if off).
+    - The header row has one column per generator, named by GEN UID from gen.csv.
+      Every generator in gen.csv gets a column (renewables and storage included).
+    - Row 1 (required): status -- the number of time periods the unit has been
+      running (positive) or has been shut down (negative) at the start of the
+      simulation. E.g. +168 = on for the last 168 periods, -24 = off for 24.
+    - Row 2 (optional): power output in the period preceding the simulation.
+      Must be populated for every generator or left blank entirely.
+    - Row 3 (optional): reactive power in the preceding period. Only allowed if
+      row 2 is populated. Not written here.
 
 Default policy (deterministic "typical day" warm start, not yet randomized):
-    - Baseload-ish committable units (STEAM, CC, NUCLEAR) default ON, with
-      status = 10x their Min Up Time Hr (safely past any min-up requirement)
-      and power_generated = PMin MW (a conservative, always-feasible floor).
-    - Fast/peaking committable units (CT) default OFF, with
-      status = -10x their Min Down Time Hr and power_generated = 0.
-    - SYNC_COND units are committable (they do have on/off status) but carry
-      no real power, so they default ON with power_generated = 0.
-    - Non-committable units (PV, RTPV, WIND, HYDRO, ROR, CSP, STORAGE) get
-      Committable=No, status/power_generated left blank -- their output is
-      driven by the timeseries / dispatch, not a UC initial condition.
+    - NUCLEAR and HYDRO/ROR default ON at ON_PERIODS, nuclear at PMax and hydro
+      at a nominal 50 MW -- matching the reference RTS-GMLC initial_status.csv.
+    - STEAM / CC default ON at ON_PERIODS and PMin MW (a conservative,
+      always-feasible floor above their minimum stable level).
+    - CT peakers default OFF at -OFF_PERIODS with 0 MW.
+    - SYNC_COND default ON but carry no real power, so 0 MW.
+    - Renewables (PV, RTPV, WIND, CSP) and STORAGE default OFF at -OFF_PERIODS
+      with 0 MW; their actual output is driven by the timeseries, not by this
+      initial condition.
 
-This is meant as a baseline/template: for scenario generation you'll likely
-want to randomize status/power_generated (see the brainstormed sampling
-ideas for generator initial conditions) rather than use this fixed baseline
-directly.
-
-Alongside the CSV, this also writes a JSON template of the same data, in the
-{"gen_name": [status, power_generated]} format that update_gmlc.py's
-update_initial_status() consumes -- only for committable generators, since
-status/power_generated aren't meaningful for the rest. Edit this JSON (or
-generate your own with the same schema) and feed it back through
-update_gmlc.py to set a different initial-condition scenario.
+Alongside the CSV, this writes a JSON template of the same data, in the
+{"gen_name": [status, power_output]} format that update_gmlc.py's
+update_initial_status() consumes. Edit that JSON (or generate your own with the
+same schema) and feed it back through update_gmlc.py to set a different
+initial-condition scenario.
 """
 
+import csv
 import json
 import os
+
 import pandas as pd
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,59 +44,59 @@ GEN_CSV = os.path.join(SOURCE_DATA_DIR, "gen.csv")
 OUT_CSV = os.path.join(SOURCE_DATA_DIR, "initial_status.csv")
 OUT_JSON = os.path.join(SCRIPT_DIR, "..", "initial_status.json")
 
-# Unit types that carry a real UC on/off commitment decision.
-COMMITTABLE_TYPES = {"STEAM", "CC", "NUCLEAR", "CT", "SYNC_COND"}
+ON_PERIODS = 168     # periods a default-on unit has already been running
+OFF_PERIODS = 24     # periods a default-off unit has already been down
 
-# Within committable types, which default ON vs OFF for the baseline day.
-DEFAULT_ON_TYPES = {"STEAM", "CC", "NUCLEAR", "SYNC_COND"}
-DEFAULT_OFF_TYPES = {"CT"}
+# Unit types that start the horizon committed.
+DEFAULT_ON_TYPES = {"STEAM", "CC", "NUCLEAR", "SYNC_COND", "HYDRO", "ROR"}
 
-STATUS_HOURS_MULTIPLIER = 10  # multiple of min up/down time used for default status magnitude
+HYDRO_NOMINAL_MW = 50.0  # matches the reference RTS-GMLC initial_status.csv
+
+
+def initial_condition(gen_row):
+    """Return (status, power_output) for one row of gen.csv."""
+    unit_type = gen_row["Unit Type"]
+
+    if unit_type not in DEFAULT_ON_TYPES:
+        return -OFF_PERIODS, 0.0
+
+    if unit_type == "SYNC_COND":
+        power = 0.0
+    elif unit_type == "NUCLEAR":
+        power = float(gen_row["PMax MW"])
+    elif unit_type in ("HYDRO", "ROR"):
+        power = HYDRO_NOMINAL_MW
+    else:  # STEAM, CC
+        power = float(gen_row["PMin MW"])
+
+    return ON_PERIODS, power
 
 
 def build_initial_status(gen_csv=GEN_CSV, out_csv=OUT_CSV, out_json=OUT_JSON):
     gen = pd.read_csv(gen_csv)
 
-    rows = []
+    gen_names, statuses, powers = [], [], []
     for _, g in gen.iterrows():
-        uid = g["GEN UID"]
-        unit_type = g["Unit Type"]
-        committable = unit_type in COMMITTABLE_TYPES
+        status, power = initial_condition(g)
+        gen_names.append(g["GEN UID"])
+        statuses.append(status)
+        powers.append(power)
 
-        if not committable:
-            rows.append({"GEN UID": uid, "Committable": "No", "status": "", "power_generated": ""})
-            continue
+    with open(out_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(gen_names)
+        writer.writerow(statuses)
+        writer.writerow(powers)
 
-        if unit_type in DEFAULT_ON_TYPES:
-            min_up = max(g["Min Up Time Hr"], 1.0)
-            status = STATUS_HOURS_MULTIPLIER * min_up
-            power_generated = 0.0 if unit_type == "SYNC_COND" else g["PMin MW"]
-        else:  # DEFAULT_OFF_TYPES
-            min_down = max(g["Min Down Time Hr"], 1.0)
-            status = -STATUS_HOURS_MULTIPLIER * min_down
-            power_generated = 0.0
+    n_on = sum(1 for s in statuses if s > 0)
+    print(f"Wrote {out_csv} ({len(gen_names)} generators, {n_on} initially on)")
 
-        rows.append({
-            "GEN UID": uid,
-            "Committable": "Yes",
-            "status": status,
-            "power_generated": power_generated,
-        })
-
-    out = pd.DataFrame(rows, columns=["GEN UID", "Committable", "status", "power_generated"])
-    out.to_csv(out_csv, index=False)
-    print(f"Wrote {out_csv} ({len(out)} generators, {(out['Committable'] == 'Yes').sum()} committable)")
-
-    committable = out[out["Committable"] == "Yes"]
-    json_data = {
-        row["GEN UID"]: [row["status"], row["power_generated"]]
-        for _, row in committable.iterrows()
-    }
+    json_data = {name: [s, p] for name, s, p in zip(gen_names, statuses, powers)}
     with open(out_json, "w") as f:
         json.dump(json_data, f, indent=2)
-    print(f"Wrote {out_json} ({len(json_data)} committable generators)")
+    print(f"Wrote {out_json} ({len(json_data)} generators)")
 
-    return out
+    return gen_names, statuses, powers
 
 
 if __name__ == "__main__":
