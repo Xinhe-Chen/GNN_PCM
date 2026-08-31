@@ -5,7 +5,9 @@ Format per the Prescient docs:
 https://prescient.readthedocs.io/en/latest/reference/file_formats/rts-gmlc/initial_status.html
 
     - The header row has one column per generator, named by GEN UID from gen.csv.
-      Every generator in gen.csv gets a column (renewables and storage included).
+      Only dispatchable units get a column: the timeseries-driven renewables
+      (HYDRO, ROR, PV, RTPV, WIND) are skipped entirely, since their output is
+      set by the timeseries rather than by an initial condition.
     - Row 1 (required): status -- the number of time periods the unit has been
       running (positive) or has been shut down (negative) at the start of the
       simulation. E.g. +168 = on for the last 168 periods, -24 = off for 24.
@@ -15,15 +17,14 @@ https://prescient.readthedocs.io/en/latest/reference/file_formats/rts-gmlc/initi
       row 2 is populated. Not written here.
 
 Default policy (deterministic "typical day" warm start, not yet randomized):
-    - NUCLEAR and HYDRO/ROR default ON at ON_PERIODS, nuclear at PMax and hydro
-      at a nominal 50 MW -- matching the reference RTS-GMLC initial_status.csv.
+    - HYDRO, ROR, PV, RTPV and WIND are omitted from the file altogether -- they
+      follow their timeseries, so an initial commitment status is meaningless.
+    - NUCLEAR defaults ON at ON_PERIODS and PMax.
     - STEAM / CC default ON at ON_PERIODS and PMin MW (a conservative,
       always-feasible floor above their minimum stable level).
     - CT peakers default OFF at -OFF_PERIODS with 0 MW.
     - SYNC_COND default ON but carry no real power, so 0 MW.
-    - Renewables (PV, RTPV, WIND, CSP) and STORAGE default OFF at -OFF_PERIODS
-      with 0 MW; their actual output is driven by the timeseries, not by this
-      initial condition.
+    - CSP and STORAGE default OFF at -OFF_PERIODS with 0 MW.
 
 Alongside the CSV, this writes a JSON template of the same data, in the
 {"gen_name": [status, power_output]} format that update_gmlc.py's
@@ -48,9 +49,10 @@ ON_PERIODS = 168     # periods a default-on unit has already been running
 OFF_PERIODS = 24     # periods a default-off unit has already been down
 
 # Unit types that start the horizon committed.
-DEFAULT_ON_TYPES = {"STEAM", "CC", "NUCLEAR", "SYNC_COND", "HYDRO", "ROR"}
+DEFAULT_ON_TYPES = {"STEAM", "CC", "NUCLEAR", "SYNC_COND"}
 
-HYDRO_NOMINAL_MW = 50.0  # matches the reference RTS-GMLC initial_status.csv
+# Timeseries-driven renewables: no initial condition is written for these at all.
+SKIP_TYPES = {"HYDRO", "ROR", "PV", "RTPV", "WIND"}
 
 
 def initial_condition(gen_row):
@@ -64,8 +66,6 @@ def initial_condition(gen_row):
         power = 0.0
     elif unit_type == "NUCLEAR":
         power = float(gen_row["PMax MW"])
-    elif unit_type in ("HYDRO", "ROR"):
-        power = HYDRO_NOMINAL_MW
     else:  # STEAM, CC
         power = float(gen_row["PMin MW"])
 
@@ -74,6 +74,9 @@ def initial_condition(gen_row):
 
 def build_initial_status(gen_csv=GEN_CSV, out_csv=OUT_CSV, out_json=OUT_JSON):
     gen = pd.read_csv(gen_csv)
+
+    n_all = len(gen)
+    gen = gen[~gen["Unit Type"].isin(SKIP_TYPES)]
 
     gen_names, statuses, powers = [], [], []
     for _, g in gen.iterrows():
@@ -89,7 +92,8 @@ def build_initial_status(gen_csv=GEN_CSV, out_csv=OUT_CSV, out_json=OUT_JSON):
         writer.writerow(powers)
 
     n_on = sum(1 for s in statuses if s > 0)
-    print(f"Wrote {out_csv} ({len(gen_names)} generators, {n_on} initially on)")
+    print(f"Wrote {out_csv} ({len(gen_names)} generators, {n_on} initially on; "
+          f"skipped {n_all - len(gen_names)} timeseries-driven renewables)")
 
     json_data = {name: [s, p] for name, s, p in zip(gen_names, statuses, powers)}
     with open(out_json, "w") as f:
