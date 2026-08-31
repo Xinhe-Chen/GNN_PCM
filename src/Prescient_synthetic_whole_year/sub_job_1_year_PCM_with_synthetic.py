@@ -44,10 +44,6 @@ def write_job_script(suffix, job_name, queue=QUEUE, email=EMAIL, env=CONDA_ENV):
             "#$ -cwd\n"
             f"#$ -o sim_job_logs/{job_name}.out\n"
             f"#$ -e sim_job_logs/{job_name}.err\n"
-            "\n"
-            "set -e\n"
-            "cd \"$(dirname \"$(readlink -f \"$0\")\")/..\"\n"
-            "\n"
             # a batch shell is not interactive, so conda's shell function has to be
             # sourced before `conda activate` works
             'source "$(conda info --base)/etc/profile.d/conda.sh"\n'
