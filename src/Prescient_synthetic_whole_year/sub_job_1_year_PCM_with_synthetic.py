@@ -2,7 +2,8 @@
 
 The case is the "{suffix}_rts_gmlc" folder built by
 generate_synthetic_rts_gmlc_whole_year.py; the same suffix is handed to
-pcm_run_using_synthetic.py, which writes to results/{suffix}_results.
+pcm_run_using_synthetic.py along with the job name, which writes to
+results/{job_name}_results.
 
 Usage
 -----
@@ -50,7 +51,7 @@ def write_job_script(suffix, job_name, queue=QUEUE, email=EMAIL, env=CONDA_ENV):
             f"conda activate {env}\n"
             "module load gurobi\n"
             "\n"
-            f"python {RUN_SCRIPT} {suffix}\n"
+            f"python {RUN_SCRIPT} {suffix} {job_name}\n"
         )
 
     return file_name

@@ -6,15 +6,18 @@ this_file_path = os.path.dirname(os.path.realpath(__file__))
 
 # which synthetic case to run: the "{suffix}_rts_gmlc" folder built by
 # generate_synthetic_rts_gmlc_whole_year.py. Override from the command line
-# ("python pcm_run_using_synthetic.py case01") to run a different case.
+# ("python pcm_run_using_synthetic.py case01 [job_name]") to run a different case.
 suffix = sys.argv[1] if len(sys.argv) > 1 else "test"
+# the name of this run, which labels the output folder. Defaults to the case
+# suffix, so a second argument only matters when several runs share one case.
+job_name = sys.argv[2] if len(sys.argv) > 2 else suffix
 case_path = os.path.join(this_file_path, f"{suffix}_rts_gmlc")
 
 # default some options
 shortfall = 500
 output_folder = os.path.join(this_file_path, "results")
 os.makedirs(output_folder, exist_ok=True)
-output_path = os.path.join(output_folder, f"{suffix}_results")
+output_path = os.path.join(output_folder, f"{job_name}_results")
 
 # the rts-gmlc parser reads bus/gen/timeseries_pointers from SourceData and
 # resolves the time series files relative to it
@@ -41,7 +44,7 @@ prescient_options = {
         "start_date":"01-01-2020",
         "num_days":366,
         "sced_horizon":1,
-        "ruc_mipgap":0.001,
+        "ruc_mipgap":0.01,
 	    "deterministic_ruc_solver": "gurobi",
         "sced_solver":"gurobi",
         "sced_frequency_minutes":60,
