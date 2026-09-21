@@ -1,0 +1,103 @@
+{
+  "model_class": "OPFGNN",
+  "model_config": {
+    "in_features": 8,
+    "hidden_features": [
+      32,
+      16
+    ],
+    "taps": 3,
+    "readout": "local",
+    "dropout": 0.0
+  },
+  "metrics": {
+    "dispatch_mae_mw": 10.540124893188477,
+    "dispatch_mae_mw_interior": 13.664200782775879,
+    "dispatch_mae_mw_at_bound": 7.631828308105469,
+    "dispatch_mae_mw_congested": 16.8314151763916,
+    "dispatch_mae_mw_uncongested": 9.515950202941895,
+    "total_dispatch_mae_mw": 0.0681392028927803,
+    "flow_mae_mw": 2.8750431537628174,
+    "congestion_accuracy": 0.9997545582047686,
+    "congestion_precision": 0.9807692307692307,
+    "congestion_recall": 0.9230769230769231,
+    "congestion_f1": 0.951048951048951,
+    "balance_residual_mw": 0.06815124303102493,
+    "n_hours": 1426,
+    "n_hours_congested": 201,
+    "n_parameters": 2369,
+    "best_epoch": 192
+  },
+  "torch_version": "2.11.0+cpu",
+  "saved_at": "2026-09-21T14:14:58",
+  "checkpoint_file": "opfgnn.pt",
+  "feature_names": [
+    "load_mw",
+    "renewable_avail_mw",
+    "committed_pmax_mw",
+    "committed_pmin_mw",
+    "committed_mc",
+    "committed_unit_count",
+    "incident_line_cap_mw",
+    "incident_cap_per_susc"
+  ],
+  "gen_bus_ids": [
+    101,
+    102,
+    107,
+    113,
+    115,
+    116,
+    118,
+    121,
+    123,
+    201,
+    202,
+    207,
+    213,
+    215,
+    216,
+    218,
+    221,
+    223,
+    301,
+    302,
+    307,
+    313,
+    315,
+    316,
+    318,
+    321,
+    322,
+    323
+  ],
+  "pcm_runs": [
+    "base_case_pcm_test"
+  ],
+  "dataset": "C:\\Users\\JKLCh\\Desktop\\ND_PhD\\Research\\GNN_PCM\\data\\model\\opf_dcopf_dataset.npz",
+  "training_args": {
+    "dataset": "C:\\Users\\JKLCh\\Desktop\\ND_PhD\\Research\\GNN_PCM\\data\\model\\opf_dcopf_dataset.npz",
+    "model": "both",
+    "hidden": [
+      32,
+      16
+    ],
+    "taps": 3,
+    "readout": "local",
+    "mlp_hidden": [
+      256,
+      128
+    ],
+    "dropout": 0.0,
+    "lr": 0.001,
+    "weight_decay": 0.0,
+    "epochs": 200,
+    "batch_size": 128,
+    "patience": 40,
+    "log_every": 20,
+    "seed": 0,
+    "flow_penalty": 0.0,
+    "no_balance": false,
+    "out_dir": "C:\\Users\\JKLCh\\Desktop\\ND_PhD\\Research\\GNN_PCM\\model\\GNN_OPF"
+  }
+}

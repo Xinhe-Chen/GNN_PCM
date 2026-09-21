@@ -111,33 +111,70 @@ def build_daily_graphs(dataset: dict, edge_index: torch.Tensor, edge_weight: tor
     Node label (y): the generator's 24-hour on/off commitment status for
     that day, shape [G, 24].
     """
-    NF = dataset["NF"]  # [N, 24, D]
-    commitment = dataset["commitment"]  # [G, 24, D]
+    NF = dataset["NF"]  # [N, 24, D_days]
+    commitment = dataset["commitment"]  # [G, 24, D_samples]
     gen_bus_idx = dataset["gen_bus_idx"]  # [G]
-    NR = dataset.get("NR") if dataset.get("has_renewable") else None  # [N, 24, D] or None
+    NR = dataset.get("NR") if dataset.get("has_renewable") else None  # [N, 24, D_days] or None
 
-    n_days = commitment.shape[2]
+    n_samples = commitment.shape[2]
+    # When several PCM runs are merged, commitment is indexed by sample while
+    # NF/NR stay indexed by calendar day, so map through "sample_day".
+    sample_day = dataset.get("sample_day")
+    if sample_day is None:
+        sample_day = np.arange(n_samples)
+    sample_run = dataset.get("sample_run", np.full(n_samples, "unknown"))
+
     graphs = []
-    for d in range(n_days):
+    for s in range(n_samples):
+        d = int(sample_day[s])
         demand = NF[gen_bus_idx, :, d]  # [G, 24]
         feats = demand if NR is None else np.concatenate([demand, NR[gen_bus_idx, :, d]], axis=1)
         x = torch.tensor(feats, dtype=torch.float)  # [G, 24] or [G, 48]
-        y = torch.tensor(commitment[:, :, d], dtype=torch.float)  # [G, 24]
-        graphs.append(Data(x=x, y=y, edge_index=edge_index, edge_weight=edge_weight))
+        y = torch.tensor(commitment[:, :, s], dtype=torch.float)  # [G, 24]
+        graphs.append(
+            Data(
+                x=x,
+                y=y,
+                edge_index=edge_index,
+                edge_weight=edge_weight,
+                day_index=int(d),
+                run_name=str(sample_run[s]),
+            )
+        )
     return graphs
 
 
-def split_graphs(graphs: list, train_frac: float = 0.7, val_frac: float = 0.15, seed: int = 0):
-    rng = np.random.default_rng(seed)
-    idx = rng.permutation(len(graphs))
-    n_train = int(train_frac * len(graphs))
-    n_val = int(val_frac * len(graphs))
+def split_graphs(
+    graphs: list, train_frac: float = 0.7, val_frac: float = 0.15, seed: int = 0, group_by_day: bool = True
+):
+    """Split graphs into train/val/test.
 
-    train_idx, val_idx, test_idx = idx[:n_train], idx[n_train : n_train + n_val], idx[n_train + n_val :]
-    train = [graphs[i] for i in train_idx]
-    val = [graphs[i] for i in val_idx]
-    test = [graphs[i] for i in test_idx]
-    return train, val, test
+    With `group_by_day` (the default), the split is made over *calendar days*
+    rather than over samples, so every sample sharing a day lands in the same
+    split. This matters when PCM runs are merged: different runs of the same
+    system reuse the same demand/renewable profiles, so the same day appears
+    once per run with identical features. Splitting per-sample would put an
+    identical input in both train and test and inflate the reported test
+    score. Set `group_by_day=False` to recover the old per-sample behavior.
+    """
+    rng = np.random.default_rng(seed)
+
+    if not group_by_day or not hasattr(graphs[0], "day_index"):
+        idx = rng.permutation(len(graphs))
+        n_train = int(train_frac * len(graphs))
+        n_val = int(val_frac * len(graphs))
+        parts = [idx[:n_train], idx[n_train : n_train + n_val], idx[n_train + n_val :]]
+        return tuple([graphs[i] for i in part] for part in parts)
+
+    days = np.array([int(g.day_index) for g in graphs])
+    unique_days = np.unique(days)
+    shuffled = rng.permutation(unique_days)
+
+    n_train = int(train_frac * len(shuffled))
+    n_val = int(val_frac * len(shuffled))
+    day_parts = [shuffled[:n_train], shuffled[n_train : n_train + n_val], shuffled[n_train + n_val :]]
+
+    return tuple([g for g in graphs if int(g.day_index) in set(part.tolist())] for part in day_parts)
 
 
 def normalize_features(train: list, val: list, test: list):
@@ -161,7 +198,7 @@ class UCGNN(nn.Module):
     Output: node logits [num_nodes, T] (per-hour on/off commitment).
     """
 
-    def __init__(self, in_channels: int = 24, hidden_channels: int = 64, out_channels: int = 24, num_layers: int = 3, dropout: float = 0.3):
+    def __init__(self, in_channels: int = 24, hidden_channels: int = 64, out_channels: int = 24, num_layers: int = 3, dropout: float = 0.1):
         super().__init__()
         self.dropout = dropout
 
@@ -301,7 +338,7 @@ def main():
     parser.add_argument("--num-layers", type=int, default=3)
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=5e-4)
+    parser.add_argument("--weight-decay", type=float, default=0)
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=0)
@@ -317,13 +354,26 @@ def main():
         default=str(MODEL_DIR),
         help="Directory to save the trained model bundle into.",
     )
+    parser.add_argument(
+        "--pcm-runs",
+        nargs="+",
+        default=["all"],
+        help=(
+            "PCM result folders under data/PCM_results to draw commitment labels from. "
+            "'all' (default) merges every available run; or name them explicitly."
+        ),
+    )
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    pcm_runs = "all" if args.pcm_runs == ["all"] else args.pcm_runs
     dataset = data_prep.build_dataset(
-        hours=None, commitment_hours=None, include_renewable=args.include_renewable
+        hours=None,
+        commitment_hours=None,
+        include_renewable=args.include_renewable,
+        pcm_runs=pcm_runs,
     )
     edge_index, edge_weight = build_generator_graph(dataset)
     graphs = build_daily_graphs(dataset, edge_index, edge_weight)
@@ -335,6 +385,12 @@ def main():
     in_channels = graphs[0].x.shape[1]
     out_channels = graphs[0].y.shape[1]
     print(f"node input features: {in_channels} (renewables {'on' if args.include_renewable else 'off'})")
+    print(f"PCM runs merged    : {dataset['pcm_runs']}")
+    print(
+        f"samples: {len(graphs)} over {len(np.unique(dataset['sample_day']))} distinct days "
+        f"| train {len(train_graphs)} / val {len(val_graphs)} / test {len(test_graphs)} "
+        f"(split grouped by day)"
+    )
 
     train_loader = DataLoader(train_graphs, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_graphs, batch_size=args.batch_size)
@@ -390,6 +446,8 @@ def main():
                 else "columns 0-23: host-bus hourly demand"
             ),
             "generator_ids": dataset["generator_ids"].tolist(),
+            "pcm_runs": dataset["pcm_runs"],
+            "num_samples": len(graphs),
             "training_args": vars(args),
         },
     )

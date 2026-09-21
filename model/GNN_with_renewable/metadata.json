@@ -8,13 +8,13 @@
     "dropout": 0.3
   },
   "metrics": {
-    "best_epoch": 136,
-    "best_val_accuracy": 0.8025706627680312,
-    "test_accuracy": 0.810218906641604,
-    "test_loss": 0.3781419907297407
+    "best_epoch": 191,
+    "best_val_accuracy": 0.812154808317089,
+    "test_accuracy": 0.821673323934837,
+    "test_loss": 0.3321046829223633
   },
   "torch_version": "2.11.0+cpu",
-  "saved_at": "2026-08-21T10:52:56",
+  "saved_at": "2026-09-18T16:28:04",
   "checkpoint_file": "uc_gnn_with_renewable.pt",
   "include_renewable": true,
   "feature_layout": "columns 0-23: host-bus hourly demand; columns 24-47: host-bus hourly available renewables",
@@ -96,16 +96,25 @@
     "323_CC_1",
     "323_CC_2"
   ],
+  "pcm_runs": [
+    "base_case_pcm_test",
+    "gap001_results"
+  ],
+  "num_samples": 732,
   "training_args": {
     "hidden_channels": 64,
     "num_layers": 3,
     "dropout": 0.3,
     "lr": 0.001,
-    "weight_decay": 0.0005,
+    "weight_decay": 0,
     "epochs": 200,
     "batch_size": 16,
     "seed": 0,
     "include_renewable": true,
-    "out_dir": "C:\\Users\\JKLCh\\Desktop\\ND_PhD\\Research\\GNN_PCM\\model\\GNN_with_renewable"
+    "out_dir": "C:\\Users\\JKLCh\\Desktop\\ND_PhD\\Research\\GNN_PCM\\model\\GNN_with_renewable",
+    "pcm_runs": [
+      "base_case_pcm_test",
+      "gap001_results"
+    ]
   }
 }

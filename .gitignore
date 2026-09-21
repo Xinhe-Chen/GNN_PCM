@@ -57,3 +57,6 @@ deterministic_simulation_output/
 scratch/
 tmp/
 temp/
+
+# PCM data files
+data/PCM_results/

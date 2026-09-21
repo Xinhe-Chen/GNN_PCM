@@ -98,16 +98,36 @@ def build_daily_graphs(dataset: dict, edge_index: torch.Tensor, edge_attr: torch
     x: [G, T] host-bus demand profile for that day.
     y: [G, T] generator on/off commitment status for that day.
     """
-    NF = dataset["NF"]  # [N, T, D]
-    commitment = dataset["commitment"]  # [G, T, D]
+    NF = dataset["NF"]  # [N, T, D_days]
+    commitment = dataset["commitment"]  # [G, T, D_samples]
     gen_bus_idx = dataset["gen_bus_idx"]  # [G]
+    NR = dataset.get("NR") if dataset.get("has_renewable") else None
 
-    n_days = commitment.shape[2]
+    n_samples = commitment.shape[2]
+    # With merged PCM runs, commitment is indexed by sample while NF/NR stay
+    # indexed by calendar day; "sample_day" maps between the two.
+    sample_day = dataset.get("sample_day")
+    if sample_day is None:
+        sample_day = np.arange(n_samples)
+    sample_run = dataset.get("sample_run", np.full(n_samples, "unknown"))
+
     graphs = []
-    for d in range(n_days):
-        x = torch.tensor(NF[gen_bus_idx, :, d], dtype=torch.float)
-        y = torch.tensor(commitment[:, :, d], dtype=torch.float)
-        graphs.append(Data(x=x, y=y, edge_index=edge_index, edge_attr=edge_attr))
+    for s in range(n_samples):
+        d = int(sample_day[s])
+        demand = NF[gen_bus_idx, :, d]
+        feats = demand if NR is None else np.concatenate([demand, NR[gen_bus_idx, :, d]], axis=1)
+        x = torch.tensor(feats, dtype=torch.float)
+        y = torch.tensor(commitment[:, :, s], dtype=torch.float)
+        graphs.append(
+            Data(
+                x=x,
+                y=y,
+                edge_index=edge_index,
+                edge_attr=edge_attr,
+                day_index=int(d),
+                run_name=str(sample_run[s]),
+            )
+        )
     return graphs
 
 
@@ -362,13 +382,24 @@ def main():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--pcm-runs",
+        nargs="+",
+        default=["all"],
+        help=(
+            "PCM result folders under data/PCM_results to draw commitment labels from. "
+            "'all' (default) merges every available run; or name them explicitly."
+        ),
+    )
     parser.add_argument("--checkpoint", type=str, default=str(Path(__file__).with_name("ecc_lstm_uc_checkpoint.pt")))
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dataset = data_prep.build_dataset(hours=None, commitment_hours=None)
+    pcm_runs = "all" if args.pcm_runs == ["all"] else args.pcm_runs
+    dataset = data_prep.build_dataset(hours=None, commitment_hours=None, pcm_runs=pcm_runs)
+    print(f"PCM runs merged: {dataset['pcm_runs']} | samples: {dataset['commitment'].shape[2]}")
     edge_index, edge_attr = build_generator_graph(dataset)
     graphs = build_daily_graphs(dataset, edge_index, edge_attr)
     train_graphs, val_graphs, test_graphs = split_graphs(graphs, seed=args.seed)
