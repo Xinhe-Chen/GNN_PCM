@@ -13,6 +13,15 @@ How it works
 
    Charging / discharging power is capped by the power ratings and by what the
    state of charge (SoC) allows in that interval.
+
+   Degradation (Chen et al., "Beyond Price-Taker: Multiscale Optimization of
+   Wind and Battery Integrated Energy Systems"): the usable maximum SoC fades
+   linearly with the accumulated energy throughput E,
+
+       S_t <= S_max - delta * E_t,    E_t - E_{t-1} = 0.5 * (p_c + p_d) * dt,
+
+   with delta = 1e-4 by default (a 50% capacity loss after 5000 full cycles).
+   p_c and p_d are the grid-side charging / discharging powers.
 3. The battery is injected into the SCED as its own load element
    ("BATTERY_<bus name>") at its bus: positive p_load = charging, negative
    p_load = discharging. The bus's own load is left untouched, so Prescient's
@@ -60,6 +69,8 @@ RESULT_COLUMNS = [
     "Net Load [MW]",
     "SoC Start [MWh]",
     "SoC End [MWh]",
+    "Throughput [MWh]",
+    "Max SoC [MWh]",
     "RT Revenue [$]",
 ]
 
@@ -131,6 +142,20 @@ def get_configuration(key):
         description="Discharge when the DA LMP at the bus is above this [$/MWh].",
     )).declare_as_argument()
 
+    config.declare("battery_degradation_coefficient", ConfigValue(
+        domain=NonNegativeFloat, default=1e-4,
+        description="Degradation coefficient delta: the max SoC fades as "
+                    "S_max - delta * E, E = accumulated throughput "
+                    "0.5*(charge+discharge) energy [MWh]. 1e-4 = 50%% capacity "
+                    "loss after 5000 full cycles. Set 0 to disable.",
+    )).declare_as_argument()
+
+    config.declare("battery_throughput_init", ConfigValue(
+        domain=NonNegativeFloat, default=0.0,
+        description="Accumulated energy throughput at the start of the "
+                    "simulation [MWh], e.g. to continue an aged battery.",
+    )).declare_as_argument()
+
     config.declare("battery_results_file", ConfigValue(
         domain=str, default="battery_results.csv",
         description="Name of the per-step results CSV, written in the "
@@ -160,17 +185,22 @@ class RuleBasedBattery:
         self.eta_d = float(c.battery_discharge_efficiency)
         self.buy_price = float(c.battery_buy_price)
         self.sell_price = float(c.battery_sell_price)
+        self.delta = float(c.battery_degradation_coefficient)
         self.results_file_name = c.battery_results_file
+
+        # accumulated energy throughput E [MWh]; drives the capacity fade
+        self.throughput = float(c.battery_throughput_init)
 
         soc_init = c.battery_soc_init
         self.soc = self.soc_min if soc_init is None else float(soc_init)
 
         if self.soc_min > self.soc_max:
             raise ValueError("battery_soc_min must not exceed battery_soc_max")
-        if not self.soc_min <= self.soc <= self.soc_max:
+        soc_cap = self._soc_cap(self.throughput)
+        if not self.soc_min <= self.soc <= soc_cap:
             raise ValueError(
-                f"battery_soc_init ({self.soc}) must lie in "
-                f"[battery_soc_min, battery_soc_max] = [{self.soc_min}, {self.soc_max}]")
+                f"battery_soc_init ({self.soc}) must lie in [battery_soc_min, "
+                f"degraded max SoC] = [{self.soc_min}, {soc_cap}]")
         if self.buy_price > self.sell_price:
             raise ValueError("battery_buy_price must not exceed battery_sell_price")
 
@@ -213,26 +243,38 @@ class RuleBasedBattery:
         index = hour % options.ruc_every_hours + int(period_start_minutes // 60)
         return ruc_market.day_ahead_prices.get((self.bus, index))
 
-    def _decide(self, da_lmp, soc, dt):
+    def _soc_cap(self, throughput):
+        """Degraded maximum SoC: S_max - delta * E."""
+        return self.soc_max - self.delta * throughput
+
+    def _decide(self, da_lmp, soc, throughput, dt):
         """Apply the price rule. Returns (action, p_charge, p_discharge)."""
         if da_lmp is None:
             return "idle", 0.0, 0.0
         if da_lmp < self.buy_price:
-            headroom = max(self.soc_max - soc, 0.0)
-            p = min(self.p_charge_max, headroom / (self.eta_c * dt))
+            # the step's own throughput also lowers the cap, so require
+            #   soc + eta_c*p*dt <= S_max - delta*(E + 0.5*p*dt)
+            headroom = max(self._soc_cap(throughput) - soc, 0.0)
+            p = min(self.p_charge_max,
+                    headroom / ((self.eta_c + 0.5 * self.delta) * dt))
             if p > _TOL:
                 return "charge", p, 0.0
         elif da_lmp > self.sell_price:
+            # discharging lowers the SoC faster than the cap fades
+            # (1/eta_d >= 0.5*delta), so only SoC_min binds
             available = max(soc - self.soc_min, 0.0)
             p = min(self.p_discharge_max, available * self.eta_d / dt)
             if p > _TOL:
                 return "discharge", 0.0, p
         return "idle", 0.0, 0.0
 
-    def _next_soc(self, soc, p_charge, p_discharge, dt):
+    def _next_state(self, soc, throughput, p_charge, p_discharge, dt):
+        """SoC and throughput after one interval. Returns (soc, throughput)."""
+        throughput = throughput + 0.5 * (p_charge + p_discharge) * dt
         soc = soc + self.eta_c * p_charge * dt - p_discharge * dt / self.eta_d
         # clip round-off
-        return min(max(soc, self.soc_min), self.soc_max)
+        soc = min(max(soc, self.soc_min), max(self._soc_cap(throughput), self.soc_min))
+        return soc, throughput
 
     # ------------------------------------------------------------------ #
     # Prescient callbacks
@@ -252,7 +294,8 @@ class RuleBasedBattery:
         print(f"[battery] bus={self.bus_spec}, P_ch={self.p_charge_max} MW, "
               f"P_dis={self.p_discharge_max} MW, SoC in [{self.soc_min}, "
               f"{self.soc_max}] MWh, SoC0={self.soc} MWh, buy<{self.buy_price}, "
-              f"sell>{self.sell_price} $/MWh")
+              f"sell>{self.sell_price} $/MWh, eta_c={self.eta_c}, "
+              f"eta_d={self.eta_d}, delta={self.delta}, E0={self.throughput} MWh")
 
     def before_sced(self, options, simulator, sced_instance):
         """Put the battery's planned net load into the SCED about to be solved."""
@@ -267,14 +310,14 @@ class RuleBasedBattery:
         dt = step_minutes / 60.0
         minute = simulator.time_manager.current_time.datetime.minute
 
-        # plan every SCED period, projecting SoC through the look-ahead
-        soc = self.soc
+        # plan every SCED period, projecting SoC and throughput through the look-ahead
+        soc, throughput = self.soc, self.throughput
         plan = []
         for t in range(n_periods):
             da_lmp = self._da_lmp(simulator, options, minute + t * step_minutes)
-            action, p_c, p_d = self._decide(da_lmp, soc, dt)
+            action, p_c, p_d = self._decide(da_lmp, soc, throughput, dt)
             plan.append((da_lmp, action, p_c, p_d))
-            soc = self._next_soc(soc, p_c, p_d, dt)
+            soc, throughput = self._next_state(soc, throughput, p_c, p_d, dt)
 
         net_load = [p_c - p_d for _, _, p_c, p_d in plan]
         bus_dict = sced_instance.data["elements"]["bus"][self.bus]
@@ -301,7 +344,8 @@ class RuleBasedBattery:
         revenue = (p_d - p_c) * rt_lmp * dt
 
         soc_start = self.soc
-        self.soc = self._next_soc(self.soc, p_c, p_d, dt)
+        self.soc, self.throughput = self._next_state(self.soc, self.throughput,
+                                                     p_c, p_d, dt)
 
         self._totals["charged_MWh"] += p_c * dt
         self._totals["discharged_MWh"] += p_d * dt
@@ -313,7 +357,9 @@ class RuleBasedBattery:
             None if da_lmp is None else round(da_lmp, 4),
             round(rt_lmp, 4), action,
             round(p_c, 4), round(p_d, 4), round(p_c - p_d, 4),
-            round(soc_start, 4), round(self.soc, 4), round(revenue, 4),
+            round(soc_start, 4), round(self.soc, 4),
+            round(self.throughput, 4), round(self._soc_cap(self.throughput), 4),
+            round(revenue, 4),
         ]
         # append each step so a crashed long run keeps what it already did
         with open(self.results_path, "a", newline="") as f:
@@ -324,6 +370,11 @@ class RuleBasedBattery:
         print(f"[battery] charged {t['charged_MWh']:.2f} MWh, discharged "
               f"{t['discharged_MWh']:.2f} MWh, RT revenue ${t['revenue']:.2f}, "
               f"final SoC {self.soc:.2f} MWh")
+        cap = self._soc_cap(self.throughput)
+        print(f"[battery] throughput {self.throughput:.2f} MWh, max SoC "
+              f"{self.soc_max:.2f} -> {cap:.2f} MWh "
+              f"({100 * (1 - cap / self.soc_max) if self.soc_max else 0.0:.3f}% "
+              f"capacity lost)")
         print(f"[battery] results written to {self.results_path}")
 
 

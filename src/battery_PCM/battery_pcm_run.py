@@ -71,6 +71,12 @@ def parse_args(argv=None):
                    help="charge when DA LMP < this [$/MWh]")
     b.add_argument("--sell-price", type=float, default=15.0,
                    help="discharge when DA LMP > this [$/MWh]")
+    b.add_argument("--degradation-coef", type=float, default=1e-4,
+                   help="degradation coefficient delta: max SoC = soc_max - delta * "
+                        "throughput (1e-4 = 50%% capacity loss after 5000 full cycles; "
+                        "0 disables)")
+    b.add_argument("--throughput-init", type=float, default=0.0,
+                   help="accumulated energy throughput at the start [MWh]")
     return p.parse_args(argv)
 
 
@@ -100,6 +106,8 @@ def build_options(args):
         "battery_discharge_efficiency": args.eta_discharge,
         "battery_buy_price": args.buy_price,
         "battery_sell_price": args.sell_price,
+        "battery_degradation_coefficient": args.degradation_coef,
+        "battery_throughput_init": args.throughput_init,
     }
     if args.soc_init is not None:
         battery["battery_soc_init"] = args.soc_init

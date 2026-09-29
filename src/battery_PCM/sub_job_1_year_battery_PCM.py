@@ -6,7 +6,8 @@ The job runs battery_pcm_run.py, which writes to results/{job_name}_results
 Battery and case options are passed straight through to battery_pcm_run.py.
 Only the options you give here are forwarded; everything else uses the
 defaults in battery_pcm_run.py (origin RTS-GMLC case, 01-01-2020, 366 days,
-50 MW / 50 MW / 200 MWh battery at bus 101, buy < 10, sell > 15 $/MWh).
+50 MW / 50 MW / 200 MWh battery at bus 101, buy < 10, sell > 15 $/MWh,
+degradation coefficient 1e-4).
 
 Usage
 -----
@@ -47,6 +48,8 @@ FORWARDED = [
     ("eta_discharge", "--eta-discharge"),
     ("buy_price", "--buy-price"),
     ("sell_price", "--sell-price"),
+    ("degradation_coef", "--degradation-coef"),
+    ("throughput_init", "--throughput-init"),
 ]
 
 
@@ -159,6 +162,9 @@ def parse_args(argv=None):
     b.add_argument("--eta-discharge", type=float, default=None)
     b.add_argument("--buy-price", type=float, default=None, help="[$/MWh]")
     b.add_argument("--sell-price", type=float, default=None, help="[$/MWh]")
+    b.add_argument("--degradation-coef", type=float, default=None,
+                   help="degradation coefficient delta (default in run script: 1e-4)")
+    b.add_argument("--throughput-init", type=float, default=None, help="[MWh]")
     return p.parse_args(argv)
 
 
