@@ -118,10 +118,35 @@ BUS_LOAD_CSV = DATA_DIR / "bus_load.csv"
 BUS_RENEWABLE_CSV = DATA_DIR / "bus_renewable.csv"
 
 PCM_RESULTS_DIR = REPO_ROOT / "data" / "PCM_results"
-DEFAULT_PCM_RUN = "base_case_pcm_test"
+#: PCM run every script in this folder reads by default.
+#:
+#: "base_case_pcm_no_reserve" was produced with reserve_factor = 0, which
+#: removes the one effect the LMP dual in lmp_derivation.py cannot see: in the
+#: reserve-carrying base case, 840 hours had a reserve shortfall whose shadow
+#: price adds directly to the energy price, and those hours carried essentially
+#: all of that method's bias (-$47.72 there, versus -$0.20 on hours with no
+#: shortfall). With reserves switched off the energy-only stationarity
+#: condition should hold throughout, so this run is the clean validation case.
+#:
+#: "base_case_pcm_test" is the reserve-carrying run. Either can be selected per
+#: invocation with --pcm-runs / --pcm-run without editing this file.
+DEFAULT_PCM_RUN = "base_case_pcm_no_any_reserve"
 
 DATASET_DIR = REPO_ROOT / "data" / "model"
-DEFAULT_DATASET_NAME = "opf_dcopf_dataset.npz"
+
+
+def dataset_name(pcm_run: str = DEFAULT_PCM_RUN):
+    """Dataset filename for a given PCM run.
+
+    The run name is baked into the file so that building a second run's dataset
+    cannot silently overwrite the first and leave the trainer fitting one run's
+    features against another run's labels.
+    """
+    return f"opf_dcopf_dataset_{pcm_run}.npz"
+
+
+#: Default dataset path, following DEFAULT_PCM_RUN.
+DEFAULT_DATASET_NAME = dataset_name()
 
 #: Node feature channel names, in column order. Channels 6-7 are static.
 FEATURE_NAMES = (
@@ -866,7 +891,13 @@ def main():
         default="line_detail",
         help="Source of the DC tie schedule used in the injection vector.",
     )
-    parser.add_argument("--out", type=str, default=str(DATASET_DIR / DEFAULT_DATASET_NAME))
+    parser.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        help="Output .npz. Defaults to data/model/opf_dcopf_dataset_<run>.npz, so each PCM run "
+        "gets its own file instead of overwriting the previous one.",
+    )
     args = parser.parse_args()
 
     pcm_runs = "all" if args.pcm_runs == ["all"] else args.pcm_runs
@@ -902,8 +933,15 @@ def main():
     print(f"congested hours   : {int(congested.sum())} of {n_t} ({100 * congested.mean():.1f}%)")
     print(f"unit-hours at a dispatch bound: {100 * float(data['frac_unit_hours_at_bound']):.1f}%")
 
-    out = save_dataset(data, Path(args.out))
+    if args.out:
+        out_path = Path(args.out)
+    else:
+        runs = list(data["pcm_runs"])
+        out_path = DATASET_DIR / (dataset_name(str(runs[0])) if len(runs) == 1 else "opf_dcopf_dataset_merged.npz")
+
+    out = save_dataset(data, out_path)
     print(f"\nsaved dataset to {out}")
+    print(f"train with: python train_OPF_GNN.py --dataset {out}")
 
 
 if __name__ == "__main__":

@@ -11,25 +11,25 @@
     "dropout": 0.0
   },
   "metrics": {
-    "dispatch_mae_mw": 9.6196928024292,
-    "dispatch_mae_mw_interior": 13.22262954711914,
-    "dispatch_mae_mw_at_bound": 6.265612602233887,
-    "dispatch_mae_mw_congested": 15.699536323547363,
-    "dispatch_mae_mw_uncongested": 8.6299409866333,
-    "total_dispatch_mae_mw": 0.068142369389534,
-    "flow_mae_mw": 2.6713478565216064,
-    "congestion_accuracy": 0.9997194950911641,
-    "congestion_precision": 0.9735576923076923,
-    "congestion_recall": 0.916289592760181,
-    "congestion_f1": 0.944055944055944,
-    "balance_residual_mw": 0.06814384460449219,
-    "n_hours": 1426,
-    "n_hours_congested": 201,
+    "dispatch_mae_mw": 8.552863121032715,
+    "dispatch_mae_mw_interior": 11.130556106567383,
+    "dispatch_mae_mw_at_bound": 5.592716217041016,
+    "dispatch_mae_mw_congested": 11.071839332580566,
+    "dispatch_mae_mw_uncongested": 8.012455940246582,
+    "total_dispatch_mae_mw": 0.16332347691059113,
+    "flow_mae_mw": 2.1786365509033203,
+    "congestion_accuracy": 0.9996688741721854,
+    "congestion_precision": 0.9782608695652174,
+    "congestion_recall": 0.9278350515463918,
+    "congestion_f1": 0.9523809523809524,
+    "balance_residual_mw": 0.16332660615444183,
+    "n_hours": 1359,
+    "n_hours_congested": 245,
     "n_parameters": 186268,
-    "best_epoch": 67
+    "best_epoch": 58
   },
   "torch_version": "2.11.0+cpu",
-  "saved_at": "2026-09-21T14:14:58",
+  "saved_at": "2026-09-23T11:26:57",
   "checkpoint_file": "opfmlp.pt",
   "feature_names": [
     "load_mw",
@@ -72,11 +72,11 @@
     323
   ],
   "pcm_runs": [
-    "base_case_pcm_test"
+    "base_case_pcm_no_any_reserve"
   ],
-  "dataset": "C:\\Users\\JKLCh\\Desktop\\ND_PhD\\Research\\GNN_PCM\\data\\model\\opf_dcopf_dataset.npz",
+  "dataset": "C:\\Users\\JKLCh\\Desktop\\ND_PhD\\Research\\GNN_PCM\\data\\model\\opf_dcopf_dataset_base_case_pcm_no_any_reserve.npz",
   "training_args": {
-    "dataset": "C:\\Users\\JKLCh\\Desktop\\ND_PhD\\Research\\GNN_PCM\\data\\model\\opf_dcopf_dataset.npz",
+    "dataset": "C:\\Users\\JKLCh\\Desktop\\ND_PhD\\Research\\GNN_PCM\\data\\model\\opf_dcopf_dataset_base_case_pcm_no_any_reserve.npz",
     "model": "both",
     "hidden": [
       32,
